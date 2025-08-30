@@ -1,0 +1,159 @@
+### Step 1: Prerequisites
+Before starting, ensure you have these installed on your PC:
+- **Python 3.8+**: Download from [python.org](https://www.python.org/downloads/). Verify with `python --version` in your terminal (Command Prompt on Windows, Terminal on macOS/Linux).
+- **Git**: Download from [git-scm.com](https://git-scm.com/downloads/). Verify with `git --version`.
+- A code editor like VS Code (free from [code.visualstudio.com](https://code.visualstudio.com/)) for editing files.
+- A GitHub account: Sign up at [github.com](https://github.com) if you don't have one.
+
+If you're on Windows, use Command Prompt or PowerShell; on macOS/Linux, use Terminal.
+
+### Step 2: Create the Project Directory
+1. Open your terminal.
+2. Navigate to where you want the project (e.g., `cd Documents`).
+3. Create a new folder: `mkdir active-learning-pytorch-images`.
+4. Enter the folder: `cd active-learning-pytorch-images`.
+
+This will be your project root.
+
+### Step 3: Set Up a Virtual Environment
+A virtual environment (often called "venv" or "penv" as you mentioned) isolates Python dependencies for your project.
+
+1. Create the venv: `python -m venv venv` (this creates a folder named `venv`).
+2. Activate it:
+   - Windows: `venv\Scripts\activate`
+   - macOS/Linux: `source venv/bin/activate`
+   (Your prompt should now show `(venv)` at the start.)
+3. Deactivate later with `deactivate` if needed.
+
+Always activate the venv before working on the project.
+
+### Step 4: Install Dependencies and Create requirements.txt
+Our active learning example needs PyTorch, Torchvision, and NumPy. We'll install them and generate a requirements file.
+
+1. With venv activated, install packages:
+   ```
+   pip install torch torchvision numpy matplotlib
+   ```
+   (Matplotlib is optional for visualizations, but useful for plotting accuracy vs. labels.)
+
+2. Generate `requirements.txt` (lists dependencies for others to install):
+   ```
+   pip freeze > requirements.txt
+   ```
+   This creates a file with exact versions, e.g.:
+   ```
+   numpy==1.26.4
+   torch==2.4.1
+   torchvision==0.19.1
+   matplotlib==3.9.2
+   ```
+   Tip: For reproducibility, this is great. Others can install with `pip install -r requirements.txt`.
+
+### Step 5: Set Up Project Structure and Files
+Organize like a standard Python project for cleanliness.
+
+1. Create subfolders:
+   ```
+   mkdir src data notebooks
+   ```
+   - `src/`: For main scripts.
+   - `data/`: CIFAR-10 will download here automatically.
+   - `notebooks/`: For Jupyter experiments (optional).
+
+2. Add a `.gitignore` file (ignores unnecessary files like venv, pycache):
+   - Create `.gitignore` in the root.
+   - Paste this content (basic Python template):
+     ```
+     # Python
+     __pycache__/
+     *.py[cod]
+     *.pyo
+     *.pyd
+     .Python
+     *.egg-info/
+     *.egg
+     dist/
+     build/
+     *.dat
+     *.log
+
+     # Virtualenv
+     venv/
+     ENV/
+
+     # Data
+     data/*
+
+     # Misc
+     .DS_Store
+     *.swp
+     *.bak
+     *.tmp
+     ```
+
+3. Add the main code file:
+   - In `src/`, create `active_learning_cifar.py`.
+   - Copy-paste the code from my previous response into it.
+
+4. Add a README.md (essential for GitHub; explains the project):
+   - Create `README.md` in the root.
+   - Example content (Markdown format):
+     ```
+     # Active Learning with PyTorch on CIFAR-10 Images
+
+     This project demonstrates active learning for image classification using PyTorch. It reduces labeling effort by querying uncertain samples from CIFAR-10.
+
+     ## Setup
+     1. Clone the repo: `git clone https://github.com/yourusername/active-learning-pytorch-images.git`
+     2. Create venv: `python -m venv venv`
+     3. Activate: `source venv/bin/activate` (or Windows equivalent)
+     4. Install deps: `pip install -r requirements.txt`
+     5. Run: `python src/active_learning_cifar.py`
+
+     ## Results
+     - Starts with 10% labels, adds 5% per iteration.
+     - Tracks test accuracy.
+
+     ## Extensions
+     - Add plots with Matplotlib.
+     - Try other datasets like Stanford Dogs.
+
+     For more, see the code comments.
+     ```
+
+5. (Optional) For Jupyter: Install `pip install jupyter`, then in `notebooks/`, run `jupyter notebook` to create an interactive version of the code.
+
+### Step 6: Initialize Git and Set Up GitHub Repo
+1. Initialize local Git repo:
+   ```
+   git init
+   git add .
+   git commit -m "Initial commit: Set up active learning project"
+   ```
+
+2. Create a new repo on GitHub:
+   - Go to github.com, click "New" (green button).
+   - Name: `active-learning-pytorch-images`.
+   - Description: "Active learning demo with PyTorch on images."
+   - Keep it public (or private if preferred).
+   - Don't add README/.gitignore yet (we'll push ours).
+   - Click "Create repository".
+
+3. Link and push to GitHub:
+   - Copy the repo URL (e.g., `https://github.com/yourusername/active-learning-pytorch-images.git`).
+   - In terminal:
+     ```
+     git remote add origin https://github.com/yourusername/active-learning-pytorch-images.git
+     git branch -M main
+     git push -u origin main
+     ```
+   - Authenticate with your GitHub credentials if prompted (or set up SSH for easier future pushes).
+
+### Step 7: Test and Iterate
+1. Activate venv.
+2. Run the script: `python src/active_learning_cifar.py`.
+   - It should download CIFAR-10 to `data/` and print accuracies.
+3. Commit changes: Edit files, then `git add .`, `git commit -m "Update README"`, `git push`.
+4. For your interview: Add a section in README with results/screenshots. Host on GitHub to share the link.
+
+This sets up a professional, reproducible Python project from scratch. It's version-controlled, dependency-managed, and ready for collaboration. If you run into errors (e.g., PyTorch GPU setup), let me know—PyTorch defaults to CPU but can use CUDA if you have an NVIDIA GPU and install `torch` with CUDA support. Good luck with the project and interview!
