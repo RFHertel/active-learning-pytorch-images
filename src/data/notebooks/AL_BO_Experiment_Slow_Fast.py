@@ -487,6 +487,72 @@ class EntropyStrategy(FastUncertaintyStrategy):
             return [metrics['indices'][i] for i in selected_idx], entropy[selected_idx]
 
 
+# class OptimizedBALDStrategy(QueryStrategy):
+#     """Memory-efficient BALD strategy for 4GB GPU."""
+    
+#     def __init__(self, model, device, n_classes=10, n_dropout_samples=5):
+#         super().__init__(model, device, n_classes)
+#         self.n_dropout_samples = n_dropout_samples
+    
+#     def enable_dropout(self):
+#         """Enable dropout during inference for MC-Dropout."""
+#         for module in self.model.modules():
+#             if isinstance(module, (nn.Dropout, nn.Dropout2d)):
+#                 module.train()
+    
+#     @handle_exceptions
+#     def select(self, unlabeled_loader, n_samples):
+#         with monitor.timer("BALD Selection"):
+#             logger.info(f"Starting BALD selection for {n_samples} samples")
+#             self.model.eval()
+#             self.enable_dropout()
+            
+#             chunk_size = 100
+#             all_bald_scores = []
+#             all_indices = []
+#             total_batches = len(unlabeled_loader)
+            
+#             with torch.no_grad():
+#                 for batch_idx, (data, _) in enumerate(unlabeled_loader):
+#                     if batch_idx % 50 == 0:
+#                         logger.debug(f"BALD processing batch {batch_idx}/{total_batches}")
+                    
+#                     data = data.to(self.device, non_blocking=True)
+#                     batch_size = data.size(0)
+                    
+#                     for chunk_start in range(0, batch_size, chunk_size):
+#                         chunk_end = min(chunk_start + chunk_size, batch_size)
+#                         chunk_data = data[chunk_start:chunk_end]
+                        
+#                         mc_predictions = []
+#                         for _ in range(self.n_dropout_samples):
+#                             outputs = self.model(chunk_data)
+#                             probs = F.softmax(outputs, dim=1)
+#                             mc_predictions.append(probs.unsqueeze(0))
+                        
+#                         mc_predictions = torch.cat(mc_predictions, dim=0)
+                        
+#                         mean_probs = mc_predictions.mean(dim=0)
+#                         expected_entropy = -(mean_probs * torch.log(mean_probs + 1e-10)).sum(dim=1)
+#                         entropy_of_expected = -(mc_predictions * torch.log(mc_predictions + 1e-10)).sum(dim=2).mean(dim=0)
+                        
+#                         bald = entropy_of_expected - expected_entropy
+#                         all_bald_scores.extend(bald.cpu().numpy())
+                    
+#                     start_idx = batch_idx * unlabeled_loader.batch_size
+#                     all_indices.extend(range(start_idx, start_idx + batch_size))
+                    
+#                     if batch_idx % 5 == 0:
+#                         torch.cuda.empty_cache()
+            
+#             all_bald_scores = np.array(all_bald_scores)
+#             selected_idx = np.argpartition(all_bald_scores, -n_samples)[-n_samples:]
+            
+#             logger.info(f"Selected {len(selected_idx)} samples with BALD scores: "
+#                        f"{all_bald_scores[selected_idx].min():.3f} - {all_bald_scores[selected_idx].max():.3f}")
+            
+#             return [all_indices[i] for i in selected_idx], all_bald_scores[selected_idx]
+
 class OptimizedBALDStrategy(QueryStrategy):
     """Memory-efficient BALD strategy for 4GB GPU."""
     
@@ -494,64 +560,101 @@ class OptimizedBALDStrategy(QueryStrategy):
         super().__init__(model, device, n_classes)
         self.n_dropout_samples = n_dropout_samples
     
-    def enable_dropout(self):
-        """Enable dropout during inference for MC-Dropout."""
-        for module in self.model.modules():
-            if isinstance(module, (nn.Dropout, nn.Dropout2d)):
-                module.train()
+    def apply_dropout(self, m):
+        """Helper to apply dropout during inference."""
+        if type(m) == nn.Dropout:
+            m.train()
+        elif type(m) == nn.Dropout2d:
+            m.train()
     
     @handle_exceptions
     def select(self, unlabeled_loader, n_samples):
         with monitor.timer("BALD Selection"):
             logger.info(f"Starting BALD selection for {n_samples} samples")
-            self.model.eval()
-            self.enable_dropout()
             
             chunk_size = 100
             all_bald_scores = []
             all_indices = []
             total_batches = len(unlabeled_loader)
             
-            with torch.no_grad():
-                for batch_idx, (data, _) in enumerate(unlabeled_loader):
-                    if batch_idx % 50 == 0:
-                        logger.debug(f"BALD processing batch {batch_idx}/{total_batches}")
+            # DON'T use torch.no_grad() for the entire loop
+            for batch_idx, (data, _) in enumerate(unlabeled_loader):
+                if batch_idx % 50 == 0:
+                    logger.debug(f"BALD processing batch {batch_idx}/{total_batches}")
+                
+                data = data.to(self.device, non_blocking=True)
+                batch_size = data.size(0)
+                
+                for chunk_start in range(0, batch_size, chunk_size):
+                    chunk_end = min(chunk_start + chunk_size, batch_size)
+                    chunk_data = data[chunk_start:chunk_end]
                     
-                    data = data.to(self.device, non_blocking=True)
-                    batch_size = data.size(0)
+                    mc_predictions = []
                     
-                    for chunk_start in range(0, batch_size, chunk_size):
-                        chunk_end = min(chunk_start + chunk_size, batch_size)
-                        chunk_data = data[chunk_start:chunk_end]
+                    for mc_iter in range(self.n_dropout_samples):
+                        # Set model to eval but enable dropout for each forward pass
+                        self.model.eval()
+                        self.model.apply(self.apply_dropout)
                         
-                        mc_predictions = []
-                        for _ in range(self.n_dropout_samples):
+                        # Forward pass WITH gradients disabled locally
+                        with torch.no_grad():
                             outputs = self.model(chunk_data)
                             probs = F.softmax(outputs, dim=1)
-                            mc_predictions.append(probs.unsqueeze(0))
                         
-                        mc_predictions = torch.cat(mc_predictions, dim=0)
+                        mc_predictions.append(probs.unsqueeze(0))
                         
-                        mean_probs = mc_predictions.mean(dim=0)
-                        expected_entropy = -(mean_probs * torch.log(mean_probs + 1e-10)).sum(dim=1)
-                        entropy_of_expected = -(mc_predictions * torch.log(mc_predictions + 1e-10)).sum(dim=2).mean(dim=0)
-                        
-                        bald = entropy_of_expected - expected_entropy
-                        all_bald_scores.extend(bald.cpu().numpy())
+                        # Verify dropout is working (debugging)
+                        if batch_idx == 0 and chunk_start == 0 and mc_iter < 2:
+                            logger.debug(f"MC iteration {mc_iter}, first prob: {probs[0, 0].item():.4f}")
                     
-                    start_idx = batch_idx * unlabeled_loader.batch_size
-                    all_indices.extend(range(start_idx, start_idx + batch_size))
+                    mc_predictions = torch.cat(mc_predictions, dim=0)
                     
-                    if batch_idx % 5 == 0:
-                        torch.cuda.empty_cache()
+                    # Check variance to ensure dropout is working
+                    variance = mc_predictions.var(dim=0).mean().item()
+                    if batch_idx == 0 and chunk_start == 0:
+                        logger.debug(f"MC-Dropout variance: {variance:.6f} (should be > 0)")
+                    
+                    # Compute BALD scores
+                    mean_probs = mc_predictions.mean(dim=0)
+                    
+                    # Total uncertainty (entropy of mean)
+                    total_entropy = -(mean_probs * torch.log(mean_probs + 1e-10)).sum(dim=1)
+                    
+                    # Expected data uncertainty (mean of entropies)
+                    individual_entropies = -(mc_predictions * torch.log(mc_predictions + 1e-10)).sum(dim=2)
+                    expected_entropy = individual_entropies.mean(dim=0)
+                    
+                    # BALD = epistemic uncertainty
+                    bald = total_entropy - expected_entropy
+                    all_bald_scores.extend(bald.cpu().numpy())
+                
+                # Track indices
+                start_idx = batch_idx * unlabeled_loader.batch_size
+                all_indices.extend(range(start_idx, start_idx + batch_size))
+                
+                if batch_idx % 5 == 0:
+                    torch.cuda.empty_cache()
             
             all_bald_scores = np.array(all_bald_scores)
+            
+            # Diagnostic: Check if BALD scores are all zeros (dropout not working)
+            if np.allclose(all_bald_scores, 0, atol=1e-6):
+                logger.warning("BALD scores are all near zero - dropout may not be working!")
+                print("⚠️ WARNING: BALD scores near zero - falling back to entropy")
+                # Fallback to entropy strategy
+                return self._fallback_entropy_selection(unlabeled_loader, n_samples)
+            
             selected_idx = np.argpartition(all_bald_scores, -n_samples)[-n_samples:]
             
             logger.info(f"Selected {len(selected_idx)} samples with BALD scores: "
                        f"{all_bald_scores[selected_idx].min():.3f} - {all_bald_scores[selected_idx].max():.3f}")
             
             return [all_indices[i] for i in selected_idx], all_bald_scores[selected_idx]
+    
+    def _fallback_entropy_selection(self, unlabeled_loader, n_samples):
+        """Fallback to entropy selection if BALD fails."""
+        entropy_strategy = EntropyStrategy(self.model, self.device, self.n_classes)
+        return entropy_strategy.select(unlabeled_loader, n_samples)
 
 
 class FastDiversityStrategy(FastUncertaintyStrategy):

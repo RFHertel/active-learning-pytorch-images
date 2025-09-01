@@ -55,20 +55,22 @@ def main():
     
     # Option 2: Run with custom configuration
     custom_config = {
-        'batch_size': 32,
-        'initial_labeled': 500,
-        'query_size': 250,
+        'batch_size': 64,
+        'initial_labeled': 1000,
+        'query_size': 500,
         'max_iterations': 3,
-        'epochs_per_iteration': 5,
+        'epochs_per_iteration': 10,
         'num_runs': 1,
-        'strategies': ['random', 'entropy', 'bald']
+        'strategies': ['random', 'entropy', 'bald', 'diverse_entropy']
     }
     
     print("\n2. Running Active Learning with custom settings...")
-    results_custom = run_active_learning_experiment(
+    results = run_active_learning_experiment(
         custom_config=custom_config,
         speed_mode='slow'  # or 'fast'
     )
+
+    return results
     
     # Option 3: Programmatically switch modes
     # if config_manager.mode == 'production':
@@ -76,7 +78,7 @@ def main():
     #     config_manager.set_speed('fast')
     #     results_fast = run_active_learning_experiment()
     
-    return results
+    # return results
 
 if __name__ == "__main__":
     results = main()
