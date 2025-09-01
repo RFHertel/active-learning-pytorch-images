@@ -1,0 +1,445 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Subset
+import torchvision
+import torchvision.transforms as transforms
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import webbrowser
+import random
+import copy
+from collections import Counter
+
+def run_robust_active_learning_experiment():
+    """
+    Redesigned AL experiment addressing the key issues:
+    1. Larger initial labeled set and query sizes
+    2. Proper class balancing
+    3. Better model architecture and training
+    4. Multiple runs for statistical significance
+    """
+    
+    def set_seed(seed=42):
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.backends.cudnn.deterministic = True
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    
+    # FIXED CONFIGURATION - addressing the core issues
+    config = {
+        'batch_size': 128,
+        'initial_labeled': 5000,  # Much larger initial set (10% of training data)
+        'query_size': 1000,       # Larger query size (2% of training data)
+        'max_iterations': 6,      # Fewer iterations but with meaningful differences
+        'epochs_per_iteration': 25,  # More epochs for stable training
+        'learning_rate': 0.001,
+        'weight_decay': 5e-4,
+        'num_runs': 3            # Multiple runs for statistical reliability
+    }
+
+    # Enhanced data augmentation for better generalization
+    transform_train = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))
+    ])
+    
+    transform_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))
+    ])
+
+    # Load datasets
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, 
+                                          download=True, transform=transform_train)
+    testset = torchvision.datasets.CIFAR10(root='./data', train=False, 
+                                         download=True, transform=transform_test)
+    
+    test_loader = DataLoader(testset, batch_size=config['batch_size'], shuffle=False)
+
+    # Improved ResNet-style model for better feature learning
+    class SimpleResNet(nn.Module):
+        def __init__(self, num_classes=10):
+            super(SimpleResNet, self).__init__()
+            
+            self.conv1 = nn.Conv2d(3, 64, 3, padding=1, bias=False)
+            self.bn1 = nn.BatchNorm2d(64)
+            
+            # ResBlock 1
+            self.conv2 = nn.Conv2d(64, 64, 3, padding=1, bias=False)
+            self.bn2 = nn.BatchNorm2d(64)
+            self.conv3 = nn.Conv2d(64, 64, 3, padding=1, bias=False)
+            self.bn3 = nn.BatchNorm2d(64)
+            
+            # ResBlock 2 with downsampling
+            self.conv4 = nn.Conv2d(64, 128, 3, stride=2, padding=1, bias=False)
+            self.bn4 = nn.BatchNorm2d(128)
+            self.conv5 = nn.Conv2d(128, 128, 3, padding=1, bias=False)
+            self.bn5 = nn.BatchNorm2d(128)
+            self.downsample1 = nn.Sequential(
+                nn.Conv2d(64, 128, 1, stride=2, bias=False),
+                nn.BatchNorm2d(128)
+            )
+            
+            # ResBlock 3 with downsampling
+            self.conv6 = nn.Conv2d(128, 256, 3, stride=2, padding=1, bias=False)
+            self.bn6 = nn.BatchNorm2d(256)
+            self.conv7 = nn.Conv2d(256, 256, 3, padding=1, bias=False)
+            self.bn7 = nn.BatchNorm2d(256)
+            self.downsample2 = nn.Sequential(
+                nn.Conv2d(128, 256, 1, stride=2, bias=False),
+                nn.BatchNorm2d(256)
+            )
+            
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+            self.fc = nn.Linear(256, num_classes)
+            self.dropout = nn.Dropout(0.3)
+
+        def forward(self, x):
+            # Initial conv
+            out = F.relu(self.bn1(self.conv1(x)))
+            
+            # ResBlock 1
+            identity = out
+            out = F.relu(self.bn2(self.conv2(out)))
+            out = self.bn3(self.conv3(out))
+            out += identity
+            out = F.relu(out)
+            
+            # ResBlock 2
+            identity = self.downsample1(out)
+            out = F.relu(self.bn4(self.conv4(out)))
+            out = self.bn5(self.conv5(out))
+            out += identity
+            out = F.relu(out)
+            
+            # ResBlock 3
+            identity = self.downsample2(out)
+            out = F.relu(self.bn6(self.conv6(out)))
+            out = self.bn7(self.conv7(out))
+            out += identity
+            out = F.relu(out)
+            
+            out = self.avgpool(out)
+            out = torch.flatten(out, 1)
+            out = self.dropout(out)
+            out = self.fc(out)
+            
+            return out
+
+    def ensure_class_balance(indices, targets, num_classes=10):
+        """Ensure roughly balanced class distribution in selected indices"""
+        # Count current class distribution
+        selected_targets = [targets[i] for i in indices]
+        class_counts = Counter(selected_targets)
+        
+        # Calculate target count per class
+        target_per_class = len(indices) // num_classes
+        
+        print(f"Class distribution in selected set:")
+        for i in range(num_classes):
+            count = class_counts.get(i, 0)
+            print(f"  Class {i}: {count} samples")
+        
+        return indices  # For now, just return as-is, but we track the distribution
+
+    def get_balanced_initial_set(dataset, initial_size, num_classes=10):
+        """Create a balanced initial labeled set"""
+        # Group indices by class
+        class_indices = {i: [] for i in range(num_classes)}
+        for idx, (_, label) in enumerate(dataset):
+            class_indices[label].append(idx)
+        
+        # Sample equally from each class
+        samples_per_class = initial_size // num_classes
+        selected_indices = []
+        
+        for class_label in range(num_classes):
+            available = class_indices[class_label]
+            selected = random.sample(available, min(samples_per_class, len(available)))
+            selected_indices.extend(selected)
+        
+        # If we need more samples, randomly select from remaining
+        if len(selected_indices) < initial_size:
+            remaining_indices = [i for i in range(len(dataset)) if i not in selected_indices]
+            additional_needed = initial_size - len(selected_indices)
+            additional = random.sample(remaining_indices, additional_needed)
+            selected_indices.extend(additional)
+        
+        return selected_indices[:initial_size]
+
+    def train_model(model, train_loader, epochs, device):
+        model.train()
+        criterion = nn.CrossEntropyLoss(label_smoothing=0.1)  # Label smoothing for better calibration
+        optimizer = optim.SGD(model.parameters(), lr=config['learning_rate'], 
+                             momentum=0.9, weight_decay=config['weight_decay'])
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20], gamma=0.1)
+        
+        total_loss = 0
+        for epoch in range(epochs):
+            epoch_loss = 0
+            for batch_idx, (data, target) in enumerate(train_loader):
+                data, target = data.to(device), target.to(device)
+                optimizer.zero_grad()
+                output = model(data)
+                loss = criterion(output, target)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+            
+            scheduler.step()
+            total_loss += epoch_loss / len(train_loader)
+            
+        return total_loss / epochs
+
+    def evaluate_model(model, data_loader, device):
+        model.eval()
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for data, target in data_loader:
+                data, target = data.to(device), target.to(device)
+                outputs = model(data)
+                _, predicted = torch.max(outputs, 1)
+                total += target.size(0)
+                correct += (predicted == target).sum().item()
+        return 100.0 * correct / total
+
+    # FIXED: More sophisticated AL strategies
+    def query_least_confidence_fixed(model, unlabeled_dataset, unlabeled_indices, query_size):
+        """Improved least confidence with proper uncertainty estimation"""
+        model.eval()
+        
+        # Enable Monte Carlo Dropout for better uncertainty estimation
+        def enable_dropout(m):
+            if type(m) == nn.Dropout:
+                m.train()
+        
+        model.apply(enable_dropout)
+        
+        unlabeled_subset = Subset(unlabeled_dataset, unlabeled_indices)
+        unlabeled_loader = DataLoader(unlabeled_subset, batch_size=config['batch_size'], 
+                                    shuffle=False, num_workers=0)
+        
+        uncertainties = []
+        
+        # Multiple forward passes for MC Dropout
+        n_forward_passes = 5
+        
+        with torch.no_grad():
+            for data, _ in unlabeled_loader:
+                data = data.to(device)
+                
+                # Multiple forward passes
+                predictions = []
+                for _ in range(n_forward_passes):
+                    outputs = model(data)
+                    probabilities = F.softmax(outputs, dim=1)
+                    predictions.append(probabilities)
+                
+                # Average predictions
+                mean_predictions = torch.stack(predictions).mean(dim=0)
+                
+                # Least confidence: 1 - max(p_i)
+                max_probs, _ = torch.max(mean_predictions, dim=1)
+                uncertainty = 1.0 - max_probs
+                uncertainties.extend(uncertainty.cpu().numpy())
+        
+        # Select most uncertain samples
+        uncertain_indices = np.argsort(uncertainties)[-query_size:]
+        selected_indices = [unlabeled_indices[i] for i in uncertain_indices]
+        
+        print(f"Uncertainty range: {np.min(uncertainties):.3f} - {np.max(uncertainties):.3f}")
+        return selected_indices
+
+    def query_random(unlabeled_indices, query_size):
+        return random.sample(unlabeled_indices, min(query_size, len(unlabeled_indices)))
+
+    def run_single_experiment(query_strategy, strategy_name, run_id):
+        print(f"\n{'='*60}")
+        print(f"Running {strategy_name} - Run {run_id + 1}")
+        print(f"{'='*60}")
+        
+        # Get balanced initial set
+        labeled_indices = get_balanced_initial_set(trainset, config['initial_labeled'])
+        all_indices = set(range(len(trainset)))
+        unlabeled_indices = list(all_indices - set(labeled_indices))
+        
+        # Ensure class balance in initial set
+        targets = [trainset[i][1] for i in range(len(trainset))]
+        ensure_class_balance(labeled_indices, targets)
+        
+        model = SimpleResNet().to(device)
+        results = {
+            'labeled_counts': [],
+            'train_losses': [],
+            'test_accuracies': []
+        }
+        
+        for iteration in range(config['max_iterations']):
+            print(f"\nIteration {iteration + 1}/{config['max_iterations']}")
+            print(f"Labeled: {len(labeled_indices)}, Unlabeled: {len(unlabeled_indices)}")
+            
+            # Create labeled dataset with NO transform for consistent evaluation
+            labeled_subset_eval = Subset(
+                torchvision.datasets.CIFAR10(root='./data', train=True, transform=transform_test),
+                labeled_indices
+            )
+            
+            # Create labeled dataset WITH transforms for training
+            labeled_subset_train = Subset(trainset, labeled_indices)
+            labeled_loader = DataLoader(labeled_subset_train, batch_size=config['batch_size'], 
+                                      shuffle=True, num_workers=0)
+            
+            # Train model
+            train_loss = train_model(model, labeled_loader, config['epochs_per_iteration'], device)
+            
+            # Evaluate
+            test_acc = evaluate_model(model, test_loader, device)
+            
+            results['labeled_counts'].append(len(labeled_indices))
+            results['train_losses'].append(train_loss)
+            results['test_accuracies'].append(test_acc)
+            
+            print(f"Train Loss: {train_loss:.4f}, Test Accuracy: {test_acc:.2f}%")
+            
+            # Query new samples (except in last iteration)
+            if iteration < config['max_iterations'] - 1 and len(unlabeled_indices) >= config['query_size']:
+                if query_strategy == 'random':
+                    new_indices = query_random(unlabeled_indices, config['query_size'])
+                elif query_strategy == 'active':
+                    new_indices = query_least_confidence_fixed(model, trainset, 
+                                                              unlabeled_indices, config['query_size'])
+                
+                labeled_indices.extend(new_indices)
+                unlabeled_indices = [idx for idx in unlabeled_indices if idx not in new_indices]
+        
+        return results
+
+    # Run multiple experiments for statistical significance
+    print("Starting Robust Active Learning Comparison...")
+    
+    all_results = {'random': [], 'active': []}
+    
+    for strategy in ['random', 'active']:
+        strategy_name = 'Random Sampling' if strategy == 'random' else 'Active Learning'
+        
+        for run in range(config['num_runs']):
+            set_seed(42 + run)  # Different seed for each run
+            result = run_single_experiment(strategy, strategy_name, run)
+            all_results[strategy].append(result)
+
+    # Calculate averages and confidence intervals
+    def calculate_stats(results_list):
+        # Average across runs
+        n_iterations = len(results_list[0]['test_accuracies'])
+        avg_accuracies = []
+        std_accuracies = []
+        
+        for i in range(n_iterations):
+            accuracies = [run['test_accuracies'][i] for run in results_list]
+            avg_accuracies.append(np.mean(accuracies))
+            std_accuracies.append(np.std(accuracies))
+        
+        return {
+            'labeled_counts': results_list[0]['labeled_counts'],
+            'avg_accuracies': avg_accuracies,
+            'std_accuracies': std_accuracies,
+            'train_losses': [np.mean([run['train_losses'][i] for run in results_list]) 
+                           for i in range(n_iterations)]
+        }
+
+    random_stats = calculate_stats(all_results['random'])
+    active_stats = calculate_stats(all_results['active'])
+
+    # Create enhanced plots with error bars
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=('Test Accuracy vs Labeled Samples (with std dev)', 
+                       'Training Loss vs Labeled Samples'),
+    )
+    
+    # Test accuracy with error bars
+    fig.add_trace(go.Scatter(
+        x=random_stats['labeled_counts'], 
+        y=random_stats['avg_accuracies'],
+        error_y=dict(type='data', array=random_stats['std_accuracies']),
+        mode='lines+markers', name='Random Sampling', 
+        line=dict(color='#ff7f0e', width=3)
+    ), row=1, col=1)
+    
+    fig.add_trace(go.Scatter(
+        x=active_stats['labeled_counts'], 
+        y=active_stats['avg_accuracies'],
+        error_y=dict(type='data', array=active_stats['std_accuracies']),
+        mode='lines+markers', name='Active Learning', 
+        line=dict(color='#1f77b4', width=3)
+    ), row=1, col=1)
+    
+    # Training loss
+    fig.add_trace(go.Scatter(
+        x=random_stats['labeled_counts'], y=random_stats['train_losses'],
+        mode='lines+markers', name='Random Loss', 
+        line=dict(color='#ff7f0e', width=2, dash='dash'),
+        showlegend=False
+    ), row=1, col=2)
+    
+    fig.add_trace(go.Scatter(
+        x=active_stats['labeled_counts'], y=active_stats['train_losses'],
+        mode='lines+markers', name='Active Loss', 
+        line=dict(color='#1f77b4', width=2, dash='dash'),
+        showlegend=False
+    ), row=1, col=2)
+    
+    fig.update_xaxes(title_text="Number of Labeled Samples")
+    fig.update_yaxes(title_text="Test Accuracy (%)", row=1, col=1)
+    fig.update_yaxes(title_text="Training Loss", row=1, col=2)
+    
+    fig.update_layout(
+        title_text=f'Robust Active Learning Comparison (CIFAR-10) - {config["num_runs"]} runs averaged',
+        height=600, width=1200,
+        template='plotly_white'
+    )
+    
+    fig.write_html('robust_al_comparison.html')
+    webbrowser.open('robust_al_comparison.html')
+    
+    # Print comprehensive results
+    print(f"\n{'='*80}")
+    print("COMPREHENSIVE RESULTS SUMMARY")
+    print(f"{'='*80}")
+    
+    for i, count in enumerate(active_stats['labeled_counts']):
+        random_acc = random_stats['avg_accuracies'][i]
+        active_acc = active_stats['avg_accuracies'][i]
+        improvement = active_acc - random_acc
+        
+        print(f"Labeled samples: {count:5d}")
+        print(f"  Random:  {random_acc:.2f}% ± {random_stats['std_accuracies'][i]:.2f}%")
+        print(f"  Active:  {active_acc:.2f}% ± {active_stats['std_accuracies'][i]:.2f}%")
+        print(f"  Improvement: {improvement:+.2f}%")
+        print()
+    
+    final_improvement = active_stats['avg_accuracies'][-1] - random_stats['avg_accuracies'][-1]
+    print(f"FINAL IMPROVEMENT: {final_improvement:+.2f}%")
+    
+    if final_improvement > 1.0:
+        print("✅ Active Learning is working as expected!")
+    else:
+        print("❌ Active Learning improvement is marginal. Possible issues:")
+        print("   - Dataset might be too easy for the model")
+        print("   - Model might be underfitting")
+        print("   - Need more sophisticated AL strategies")
+
+if __name__ == "__main__":
+    run_robust_active_learning_experiment()

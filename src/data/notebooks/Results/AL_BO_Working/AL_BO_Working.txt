@@ -1,0 +1,68 @@
+================================================================================
+ACTIVE LEARNING RESULTS SUMMARY
+================================================================================
+
+Final Accuracies (after all iterations):
+--------------------------------------------------
+Diverse Entropy     : 55.11% ± 1.07% (Δ: +2.53%) Time: 1338.8s
+Entropy             : 54.83% ± 0.14% (Δ: +2.25%) Time: 1259.3s
+Least Confidence    : 54.55% ± 0.32% (Δ: +1.97%) Time: 1254.4s
+Random              : 52.58% ± 0.53% (Δ: +0.00%) Time: 1328.0s
+Bald                : 50.66% ± 0.27% (Δ: -1.92%) Time: 1232.6s
+
+Detailed Performance Analysis:
+--------------------------------------------------
+Bald                : AUC = 42.02, Improvement = -1.79%
+Diverse Entropy     : AUC = 43.42, Improvement = +1.47%
+Entropy             : AUC = 43.76, Improvement = +2.28%
+Least Confidence    : AUC = 43.72, Improvement = +2.17%
+
+Early Performance (25% of data labeled):
+--------------------------------------------------
+Diverse Entropy     : 37.62% ± 0.22% (Δ: -0.79%)
+Entropy             : 39.15% ± 0.37% (Δ: +0.74%)
+Least Confidence    : 38.62% ± 0.19% (Δ: +0.21%)
+Random              : 38.41% ± 0.30% (Δ: +0.00%)
+Bald                : 38.51% ± 0.08% (Δ: +0.10%)
+
+================================================================================
+CONCLUSION:
+================================================================================
+✅ Best Strategy: Diverse Entropy
+✅ Improvement over Random: +2.53%
+✅ Active Learning is significantly outperforming random sampling!
+
+================================================================================
+PERFORMANCE SUMMARY
+================================================================================
+Data Setup                    : 2.23s (avg) | 2.23s (total)
+Strategy Setup                : 0.00s (avg) | 0.00s (total)
+Initial Set Selection         : 8.75s (avg) | 87.53s (total)
+Initial Set Selection         : 8.75s (avg) | 87.53s (total)
+Training (Iter 1)             : 115.06s (avg) | 1150.56s (total)
+Evaluation (Iter 1)           : 11.05s (avg) | 110.52s (total)
+Evaluation (Iter 1)           : 11.05s (avg) | 110.52s (total)
+Query Selection (Iter 1)      : 16.48s (avg) | 164.85s (total)
+Training (Iter 2)             : 115.52s (avg) | 1155.24s (total)
+Evaluation (Iter 2)           : 11.12s (avg) | 111.23s (total)
+Query Selection (Iter 2)      : 16.28s (avg) | 162.81s (total)
+Training (Iter 3)             : 118.56s (avg) | 1185.61s (total)
+Evaluation (Iter 3)           : 11.07s (avg) | 110.65s (total)
+Query Selection (Iter 3)      : 16.21s (avg) | 162.13s (total)
+Training (Iter 4)             : 119.51s (avg) | 1195.13s (total)
+Evaluation (Iter 4)           : 11.04s (avg) | 110.45s (total)
+Query Selection (Iter 4)      : 15.97s (avg) | 159.75s (total)
+Training (Iter 5)             : 117.34s (avg) | 1173.43s (total)
+Evaluation (Iter 5)           : 11.03s (avg) | 110.25s (total)
+Least Confidence Selection    : 14.50s (avg) | 115.97s (total)
+Entropy Selection             : 14.68s (avg) | 234.86s (total)
+BALD Selection                : 21.46s (avg) | 171.64s (total)
+Diversity-Aware Selection     : 30.67s (avg) | 245.35s (total)
+
+Peak GPU Memory: 0.02GB / 4.0GB
+
+⏱️  Total Execution Time: 7158.5s (119.3 minutes)
+
+================================================================================
+✅ Experiment complete! Check 'optimized_active_learning_comparison.html' for visualizations.
+================================================================================

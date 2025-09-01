@@ -157,3 +157,56 @@ Organize like a standard Python project for cleanliness.
 4. For your interview: Add a section in README with results/screenshots. Host on GitHub to share the link.
 
 This sets up a professional, reproducible Python project from scratch. It's version-controlled, dependency-managed, and ready for collaboration. If you run into errors (e.g., PyTorch GPU setup), let me know—PyTorch defaults to CPU but can use CUDA if you have an NVIDIA GPU and install `torch` with CUDA support. Good luck with the project and interview!
+
+###PIP:
+pip freeze > requirements.txt for updates to the requirements after pip installs
+
+### Installing Pytorch specifically for an RTX 3050 GPU: (See version number in NVIDIA Control Panel and look up proper code (cu126 in this case))
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+
+###To Set a PC to have proper Paging:
+
+The error you're encountering (OSError: [WinError 1455] The paging file is too small for this operation to complete) occurs during the import of PyTorch because loading its DLLs (like curand64_10.dll) requires significant virtual memory address space. This is a common Windows-specific issue with PyTorch, especially on systems with limited RAM or when the paging file (virtual memory) is configured too small. It doesn't indicate a problem with your CUDA setup, PyTorch installation, or the DLL itself—it's purely a resource allocation limit.
+To fix this, increase your Windows paging file size. Here's how:
+
+Right-click This PC (or search for "System" in the Start menu) > Properties > Advanced system settings (on the left).
+In the System Properties window, go to the Advanced tab > Performance section > Settings button.
+In Performance Options, go to the Advanced tab > Virtual memory section > Change button.
+Uncheck Automatically manage paging file size for all drives.
+Select your system drive (usually C:).
+Choose Custom size:
+
+Set Initial size (MB) to at least the amount of your physical RAM (e.g., if you have 16GB RAM, use 16384 MB).
+Set Maximum size (MB) to 1.5–2x your RAM (e.g., 24576–32768 MB), but don't exceed 32GB total unless you have a lot of disk space free (at least 2x the max size).
+
+
+Click Set > OK. You'll be prompted to restart your computer—do so for changes to take effect.
+
+After restarting, retry importing torch or running your script. If you still hit issues:
+
+Confirm your RAM amount (Task Manager > Performance > Memory) and adjust sizes accordingly—laptops often have 8–16GB, so start conservative.
+Ensure 20–30GB free space on C: for the pagefile.
+Close background apps to free RAM during runs.
+If the error persists, test with a smaller PyTorch model/batch size in your code, or temporarily switch to CPU-only PyTorch (pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu) to isolate.
+
+This should resolve it based on similar reported cases.
+
+### Make sure you are using persistent workers for multithreading situations for Batch Loading etc: Use Persistent Workers to avoid a slowdown of thread spawning and being destroyed:
+The underlying multiprocessing spawn overhead on Windows and contributes to slower execution. Spawning processes is expensive (100–500ms per worker), and with frequent DataLoader recreations (per iteration, 10× per run per strategy), it adds up—potentially 10–30% extra time per training loop.
+
+Your first option may be to set persistent workers to zero but this stops multiprocessing and only allows for one thread. Otherwise use option 2 which is for persistent workers
+
+Why persistent_workers Could Work Instead (With num_workers > 0)
+
+Reuses Workers Across Batches/Epochs: Normally, workers are created at the start of each DataLoader iteration (e.g., for data in loader:) and terminated after. With persistent_workers=True, workers stay alive and reusable across multiple iterations/epochs, reducing repeated spawning. On Windows, this means top-level code (and prints) runs only once per worker at initial creation—not every time you loop over the loader or recreate it (which happens per AL iteration in your script).
+When It Helps: If you need parallelism (e.g., for faster data aug on multi-core CPU), this minimizes spawn overhead while keeping workers. The prints would still happen once per worker (e.g., 2 extras for num_workers=2), but not repeatedly. It's a good middle ground if num_workers=0 causes CPU bottlenecks (e.g., low GPU util). Benchmarks on similar setups show 10–30% speedup over non-persistent workers on Windows, especially for multi-epoch training.
+Trade-Offs: Workers consume memory/CPU even when idle, and if they crash (e.g., from CUDA DLL issues like your earlier paging error), the whole script might fail. Not ideal if the root issue is spawn instability. Also requires PyTorch >=1.7.
+
+### First Checking the number of Threads and Cores in a PC: 
+
+Via Command Prompt/PowerShell (Windows)
+
+Open Command Prompt (cmd) or PowerShell.
+Run: wmic cpu get NumberOfCores,NumberOfLogicalProcessors
+This outputs physical cores and threads.
+

@@ -23,3 +23,8 @@ data/*
 *.swp
 *.bak
 *.tmp
+*.html 
+*.tar.gz 
+*.meta
+data_batch_*
+test_batch*
