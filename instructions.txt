@@ -210,3 +210,5 @@ Open Command Prompt (cmd) or PowerShell.
 Run: wmic cpu get NumberOfCores,NumberOfLogicalProcessors
 This outputs physical cores and threads.
 
+### For a good reference see: chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://www.diva-portal.org/smash/get/diva2:1586990/FULLTEXT01.pdf
+### Also see: chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://proceedings.mlr.press/v202/yang23p/yang23p.pdf

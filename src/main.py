@@ -54,15 +54,26 @@ def main():
     # results = run_active_learning_experiment()
     
     # Option 2: Run with custom configuration
+    # custom_config = {
+    #     'batch_size': 64,
+    #     'initial_labeled': 1000,
+    #     'query_size': 500,
+    #     'max_iterations': 3,
+    #     'epochs_per_iteration': 10,
+    #     'num_runs': 1,
+    #     'strategies': ['random', 'least_confidence', 'entropy', 'bald', 'diverse_entropy']
+    # }
+
     custom_config = {
         'batch_size': 64,
         'initial_labeled': 1000,
         'query_size': 500,
-        'max_iterations': 3,
+        'max_iterations': 20,
         'epochs_per_iteration': 10,
         'num_runs': 1,
-        'strategies': ['random', 'entropy', 'bald', 'diverse_entropy']
+        'strategies': ['random', 'bald', 'entropy']
     }
+    
     
     print("\n2. Running Active Learning with custom settings...")
     results = run_active_learning_experiment(
