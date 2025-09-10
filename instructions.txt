@@ -212,3 +212,6 @@ This outputs physical cores and threads.
 
 ### For a good reference see: chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://www.diva-portal.org/smash/get/diva2:1586990/FULLTEXT01.pdf
 ### Also see: chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://proceedings.mlr.press/v202/yang23p/yang23p.pdf
+
+###Another Expanded Search for fewer images brought PINNs: https://arxiv.org/html/2408.01026v1
+

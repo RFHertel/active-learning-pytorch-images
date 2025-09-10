@@ -500,6 +500,12 @@ class FastUncertaintyStrategy(QueryStrategy):
             'features': all_features.numpy(),
             'indices': indices
         }
+
+        # Add cleanup here
+        del probs, features, data  # Free per-batch tensors (from loop; safe if not all exist)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         return metrics
 
@@ -641,6 +647,13 @@ class OptimizedBALDStrategy(QueryStrategy):
                     
                     # BALD = epistemic uncertainty
                     bald = total_entropy - expected_entropy
+
+                    # Add cleanup here
+                    del mc_predictions, mean_probs, total_entropy, expected_entropy, individual_entropies  # Clear MC tensors
+                    #Clean up can slow down the code, have gc/empty_cache post-chunk loop if needed
+                    # gc.collect()
+                    # if torch.cuda.is_available():
+                    #     torch.cuda.empty_cache()
                     
                     # Track mean BALD score
                     batch_bald_means.append(bald.mean().item())
@@ -963,6 +976,18 @@ class OptimizedActiveLearningPipeline:
             if (epoch + 1) % max(1, epochs // 2) == 0:
                 logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}, Acc={accuracy:.2f}%")
                 print(f"    Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}, Acc={accuracy:.2f}%, Time={epoch_time:.1f}s")
+
+        # Add cleanup here
+        # del output, loss, data, target  # Clear last batch vars (safe even if not all exist)
+        # gc.collect()
+        # if torch.cuda.is_available():
+        #     torch.cuda.empty_cache()
+        # Add cleanup here (once, post all epochs)
+        if 'output' in locals():
+            del output, loss, data, target
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
        
         return total_loss / epochs
    
@@ -1105,11 +1130,32 @@ class OptimizedActiveLearningPipeline:
             
             return results
             
+        # finally:
+        #     # Always cleanup
+        #     del model, strategy  # Explicitly delete big objects
+        #     if 'labeled_loader' in locals():
+        #         del labeled_loader
+        #     if 'unlabeled_loader' in locals():
+        #         del unlabeled_loader
+        #     self.cleanup_workers()  # Already there—good!
+        #     gc.collect()
+        #     if torch.cuda.is_available():
+        #         torch.cuda.empty_cache()
+
         finally:
-            # Always cleanup
+            # Always cleanup—with conditional for 'random' fix
+            if 'model' in locals():
+                del model
+            if 'strategy' in locals():  # Key fix: No error for 'random'
+                del strategy
+            if 'labeled_loader' in locals():
+                del labeled_loader
+            if 'unlabeled_loader' in locals():
+                del unlabeled_loader
             self.cleanup_workers()
             gc.collect()
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def cleanup_workers(self):
         """Explicitly cleanup all DataLoader workers."""
@@ -1372,6 +1418,11 @@ def main():
        print("\n" + "="*80)
        print("✅ Experiment complete! Check 'optimized_active_learning_comparison_experiment.html' for visualizations.")
        print("="*80)
+
+       del pipeline, results
+       gc.collect()
+       if torch.cuda.is_available():
+            torch.cuda.empty_cache()
        
        return results
        
